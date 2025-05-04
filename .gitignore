@@ -1,0 +1,26 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables / secrets
+.env
+
+# Chainlit config (regenerated locally)
+.chainlit/
+
+# VSCode or other editor folders
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Logs or temp
+*.log
+*.tmp

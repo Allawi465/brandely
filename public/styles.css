@@ -1,0 +1,11 @@
+a.watermark {
+    display: none !important;
+}
+
+img.logo {
+    display: none !important;
+}
+
+a.watermark svg {
+    display: none !important;
+}
