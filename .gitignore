@@ -11,7 +11,9 @@ venv/
 .env
 
 # Chainlit config (regenerated locally)
-.chainlit/
+.chainlit/*
+!.chainlit/config.toml
+!.chainlit/styles.css
 
 # VSCode or other editor folders
 .vscode/
