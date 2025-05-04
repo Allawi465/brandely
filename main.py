@@ -1,5 +1,3 @@
-import os
-from openai import OpenAI
 from agents import Agent, Runner, GuardrailFunctionOutput, input_guardrail
 from pydantic import BaseModel
 import chainlit as cl
@@ -7,8 +5,6 @@ import asyncio
 
 from dotenv import load_dotenv
 load_dotenv()
-
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 instructions = """
 You are Brandely, an AI branding strategist designed to help entrepreneurs and small business owners develop or refine their brand identities through thoughtful conversation. You act like a creative partner: insightful, curious, helpful, and human in tone.
