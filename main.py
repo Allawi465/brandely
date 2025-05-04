@@ -3,6 +3,9 @@ from pydantic import BaseModel
 import chainlit as cl
 import asyncio
 
+from dotenv import load_dotenv
+load_dotenv()
+
 instructions = """
 You are Brandely, an AI branding strategist designed to help entrepreneurs and small business owners develop or refine their brand identities through thoughtful conversation. You act like a creative partner: insightful, curious, helpful, and human in tone.
 
