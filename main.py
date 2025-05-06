@@ -1,27 +1,52 @@
+import os
+import re
+import asyncio
+from dotenv import load_dotenv
+import chainlit as cl
 from agents import Agent, Runner, GuardrailFunctionOutput, input_guardrail
 from pydantic import BaseModel
-import chainlit as cl
-import asyncio
+from openai import AsyncOpenAI
 
-from dotenv import load_dotenv
+# Load environment variables
 load_dotenv()
 
+# In-memory store for user session data
+user_profiles = {}
+user_history = {}
+
+# ---------------- INSTRUCTIONS ---------------- #
 instructions = """
-You are Brandely, an AI branding strategist designed to help entrepreneurs and small business owners develop or refine their brand identities through thoughtful conversation. You act like a creative partner: insightful, curious, helpful, and human in tone.
+You are Brandely, an AI branding strategist. Think, speak, and act like a seasoned creative director who guides founders through brand discovery in a calm, conversational way.
+You always have access to the entire current conversation. Use what the user has already told you. Never ask the user to repeat something you can read above. Never say you have “no memory,” never reset the chat unless the user explicitly asks you to start over.
+Your purpose is to help each user create or refine a cohesive brand identity. Work in logical order, but keep the flow natural—do not label steps or sound robotic. Move forward only after the current topic is clear and confirmed.
+Hidden reasoning sequence (do not reveal as steps):
+1. Understand the business—what it does, whom it serves, what makes it unique. If unclear, ask open questions until clear.
+2. Define brand personality, tone, and core values. If none provided, suggest a few that genuinely fit and ask for feedback.
+3. Handle naming. If a name exists, reflect on its fit; offer alternatives only if invited. If no name, propose two or three ideas with one-sentence rationales, based on confirmed business, tone, and values.
+4. Address visual identity. Ask whether colors, fonts, or logos already exist. If they do, assess their fit; if not, suggest:
+- a palette of three HEX colors with brief reasoning
+- two or three Google Fonts with mood notes
+- a concise visual-style sentence that ties back to values and tone.
+5. Present a brand snapshot: name, business description, values, tone, color palette, font suggestions, and visual-style direction. Invite final tweaks.
 
-Your job is to guide users through a full branding process in a natural way. Start by reviewing the user's initial message carefully. They may already provide information such as a brand name, a description of what the business does, brand values or tone of voice, or elements of an existing visual identity like colors, fonts, or logos. Only ask about things that are missing or unclear. Do not repeat questions for things already shared. Acknowledge and reflect back anything the user gives you, and ask clarifying questions if needed.
+Conversation rules:
+- Tackle one theme at a time; wait for the user’s reply before moving on.
+- Do not repeat questions already answered.
+- Do not fall back to generic lines like “Tell me about your business” when you already know it—reference what you know and ask a precise follow-up.
+- Speak in short, natural paragraphs; use bold labels or short lists only when they improve clarity.
+- Avoid buzzwords, filler, or forced enthusiasm; be concise, confident, and genuinely helpful.
+- Do not generate or promise logos or images—this is a text-only branding consultation.
+- Stay focused on branding; politely decline requests outside that scope.
 
-Help users understand the branding process as it unfolds, but do not explain it in a robotic or step-by-step way. Keep the conversation smooth and conversational. Your goal is to help build a cohesive brand identity that makes emotional and strategic sense.
-
-Begin by making sure you understand what the business does, who it serves, and what makes it unique. If this information is missing or vague, ask open-ended questions to clarify. Then explore the brand’s tone and values. If the user hasn’t provided any, offer a few reasonable options based on their business and ask for feedback. If the user has a brand name, reflect on how well it fits the business and ask if they’re open to refining it. If no name exists, suggest a few ideas that align with the business description and values.
-
-When it comes to visual identity, ask whether the user has any existing visual elements such as color palettes, fonts, or logo design. If they do, ask if those elements still feel aligned. If they don’t have a visual direction, suggest a few color palettes (with HEX codes and brief reasoning), Google Fonts (with tone descriptions), and a general visual direction that fits the brand’s personality and goals.
-
-Wrap up by giving the user a clear, text-based brand summary including name, business description, values, tone, color palette, font suggestions, and visual style direction. Ask if anything needs to be adjusted or expanded.
-
-Speak clearly, stay helpful and engaging, and never overwhelm the user with too much at once. Format your responses in a way that’s easy to read. Do not generate logos or images. This is a text-only demo focused on branding strategy and guidance.
+Make the branding process feel easy, collaborative, and intelligent.
 """
 
+# ---------------- Brand Name Extraction ---------------- #
+def extract_brand_name(text: str):
+    match = re.search(r"(?:brand name is|my brand is)\s+([A-Za-z0-9\- ]+)", text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+# ---------------- Guardrail Function ---------------- #
 class InputCheck(BaseModel):
     is_safe: bool
     reason: str
@@ -57,34 +82,86 @@ async def no_sensitive_topics(ctx, agent, input_data):
         tripwire_triggered=False
     )
 
-# Brandely Agent
+# ---------------- Brandely Agent ---------------- #
 my_agent = Agent(
     name="Brandely",
     instructions=instructions,
     input_guardrails=[no_sensitive_topics]
 )
 
+# ---------------- STARTERS ---------------- #
+@cl.set_starters
+async def set_starters():
+    return [
+        cl.Starter(
+            label="Clarify my brand positioning",
+            message="I'm building a new brand and need help clarifying what makes it distinct. Can you guide me through defining my positioning and target audience?",
+        ),
+        cl.Starter(
+            label="Define tone and personality",
+            message="I want my brand to have a clear personality and tone of voice. Can you help me shape that so it feels consistent across all channels?",
+        ),
+        cl.Starter(
+            label="Develop a strong brand name",
+            message="I need a compelling brand name that reflects my values and market. Can you guide me through generating and evaluating options?",
+        ),
+        cl.Starter(
+            label="Create a visual identity foundation",
+            message="I'm ready to define my visual style. Can you help me choose a color palette and fonts that align with my brand's values and tone?",
+        ),
+    ]
+
+# ---------------- MESSAGE HANDLER ---------------- #
 @cl.on_message
 async def handle_message(message: cl.Message):
     try:
-        # Show "Brandely is thinking..." message
-        thinking_msg = cl.Message(author="Brandely", content="Brandely is thinking...")
-        await thinking_msg.send()
+        session_id = message.author
 
-        # Run the agent in the background
-        result = await Runner.run(my_agent, message.content)
+        # Use in-memory chat history instead of Redis
+        if session_id not in user_history:
+            user_history[session_id] = []
 
-        # Replace the "thinking..." message with streamed tokens
-        response_msg = cl.Message(author="Brandely", content="", id=thinking_msg.id)
-        
-        # Optionally add a small delay before streaming starts
+        # Add the new user input to the in-memory history
+        user_history[session_id].append({"role": "user", "content": message.content})
+
+        # Format history into OpenAI-compatible messages
+        formatted_history = [{"role": "user", "content": msg["content"]} for msg in user_history[session_id]]
+
+        # Optional: Trim history to avoid token limits
+        formatted_history = formatted_history[-40:]
+
+        # Typing indicator in Chainlit
+        thinking = cl.Message(author="Brandely", content="Brandely is thinking…")
+        await thinking.send()
+
+        # Directly specify the GPT-4o model here
+        openai_client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+        # Make the chat completion request using GPT-4o
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o",  # Specify the GPT-4o model
+            messages=[ 
+                {"role": "system", "content": instructions},
+                *formatted_history
+            ],
+            temperature=0.7
+        )
+
+        # Extract reply content from OpenAI's response
+        reply_content = response.choices[0].message.content
+        print(f"[DEBUG] OpenAI reply: {reply_content}")
+
+        # Stream the response to the UI
+        response_msg = cl.Message(author="Brandely", content="", id=thinking.id)
         await asyncio.sleep(0.3)
-
-        for char in result.final_output:
+        for tok in reply_content:
             await asyncio.sleep(0.01)  # Simulated typing speed
-            await response_msg.stream_token(char)
+            await response_msg.stream_token(tok)
 
         await response_msg.update()
 
+        # Save user and assistant messages back into in-memory history
+        user_history[session_id].append({"role": "assistant", "content": reply_content})
+
     except Exception as e:
-        await cl.Message(content=f"Guardrail error: {e}").send()
+        await cl.Message(content=f"Error: {e}").send()

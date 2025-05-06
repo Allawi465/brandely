@@ -9,3 +9,30 @@ img.logo {
 a.watermark svg {
     display: none !important;
 }
+
+#welcome-screen {
+    flex-direction: column-reverse;
+}
+
+body::-webkit-scrollbar {
+    display: none !important;
+}
+
+body {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+}
+
+div[style*="overflow-y: auto"],
+div[class*="overflow-y-auto"] {
+    scrollbar-width: none;
+    /* Firefox */
+    -ms-overflow-style: none;
+    /* IE and Edge */
+}
+
+/* Chrome/Safari scrollbar hiding */
+div[style*="overflow-y: auto"]::-webkit-scrollbar,
+div[class*="overflow-y-auto"]::-webkit-scrollbar {
+    display: none;
+}
